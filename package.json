@@ -1,0 +1,68 @@
+{
+  "name": "win-system-info-agent",
+  "version": "1.0.0",
+  "description": "Agente de recopilación de información del sistema Windows",
+  "main": "dist/index.js",
+  "bin": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "package": "pkg ."
+  },
+  "pkg": {
+    "outputPath": "release",
+    "targets": [
+      "node16-win-x64"
+    ],
+    "assets": [
+      "dist/**/*"
+    ]
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "mysql2": "^2.3.3",
+    "node-powershell": "^5.0.1",
+    "node-schedule": "^2.1.0",
+    "node-windows": "^1.0.0-beta.8",
+    "sequelize": "^6.21.0",
+    "systeminformation": "^5.11.9",
+    "winston": "^3.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/node-schedule": "^2.1.0",
+    "@types/node-windows": "^0.1.6",
+    "pkg": "^5.8.1",
+    "ts-node": "^10.8.1",
+    "typescript": "^4.7.4"
+  },
+  "build": {
+    "appId": "com.infoagent.app",
+    "productName": "SystemInfoAgent",
+    "files": [
+      "dist/**/*",
+      "!node_modules/**/*"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "installerIcon": "resources/icon.ico"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+directories:
+  output: dist
+  buildResources: build
+appId: com.infoagent.app
+productName: SystemInfoAgent
+win:
+  target: nsis
+  icon: assets/icon.ico
+nsis:
+  oneClick: true
+  perMachine: true
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
+  runAfterFinish: true
+  installerIcon: assets/icon.ico
+files: []
+electronVersion: 20.3.12
