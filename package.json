@@ -2,13 +2,17 @@
   "name": "win-system-info-agent",
   "version": "1.0.0",
   "description": "Agente de recopilación de información del sistema Windows",
-  "main": "dist/index.js",
+  "main": "dist/electron.js",
   "bin": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "package": "pkg ."
+    "start": "electron .",
+    "start-service": "node dist/index.js --service",
+    "dev": "ts-node src/electron.ts",
+    "package": "electron-builder --win",
+    "package-exe": "pkg .",
+    "install-service": "node dist/install-service.js",
+    "uninstall-service": "node dist/uninstall-service.js"
   },
   "pkg": {
     "outputPath": "release",
@@ -16,12 +20,14 @@
       "node16-win-x64"
     ],
     "assets": [
-      "dist/**/*"
+      "dist/**/*",
+      "resources/**/*"
     ]
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "electron-is-dev": "^3.0.1",
     "mysql2": "^2.3.3",
     "node-powershell": "^5.0.1",
     "node-schedule": "^2.1.0",
@@ -34,16 +40,21 @@
     "@types/node": "^18.0.0",
     "@types/node-schedule": "^2.1.0",
     "@types/node-windows": "^0.1.6",
+    "electron": "^19.1.9",
+    "electron-builder": "^23.6.0",
     "pkg": "^5.8.1",
     "ts-node": "^10.8.1",
     "typescript": "^4.7.4"
   },
   "build": {
-    "appId": "com.infoagent.app",
+    "appId": "com.systeminfo.agent",
     "productName": "SystemInfoAgent",
     "files": [
       "dist/**/*",
-      "!node_modules/**/*"
+      "resources/**/*"
+    ],
+    "extraResources": [
+      "resources/**"
     ],
     "directories": {
       "output": "release",
@@ -51,13 +62,13 @@
     },
     "win": {
       "target": [
-        "portable",
         "nsis"
       ],
       "icon": "resources/icon.ico"
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
       "perMachine": true,
       "createDesktopShortcut": false,
       "createStartMenuShortcut": true,

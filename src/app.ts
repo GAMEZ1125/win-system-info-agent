@@ -7,10 +7,29 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+// Eliminamos la importación de electron para evitar confusiones
+// import { app as electronApp } from 'electron';
+
 export class App {
   private readonly interval: number = 6; // Horas entre actualizaciones
+  private job: schedule.Job | null = null;
+  private notifyEnabled: boolean = true; // Flag para habilitar/deshabilitar notificaciones
+  private notifyCallback: ((title: string, message: string) => void) | null = null;
 
-  constructor() {
+  constructor(options?: { 
+    notifyEnabled?: boolean;
+    notifyCallback?: (title: string, message: string) => void;
+  }) {
+    // Permitir configurar si las notificaciones están habilitadas
+    if (options && typeof options.notifyEnabled !== 'undefined') {
+      this.notifyEnabled = options.notifyEnabled;
+    }
+    
+    // Guardar la función de callback para notificaciones
+    if (options && typeof options.notifyCallback === 'function') {
+      this.notifyCallback = options.notifyCallback;
+    }
+    
     // Crear directorio para almacenamiento de logs
     const logDir = path.join(os.homedir(), 'AppData', 'Local', 'SystemInfoAgent', 'logs');
     if (!fs.existsSync(logDir)) {
@@ -32,11 +51,15 @@ export class App {
       logger.info('Aplicación iniciada correctamente');
     } catch (error) {
       logger.error(`Error al inicializar la aplicación: ${error}`);
+      throw error; // Re-lanzar el error para manejarlo en el nivel superior
     }
   }
 
-  private async collectAndSaveSystemInfo(): Promise<void> {
+  // Hacer el método público para poder llamarlo desde la interfaz
+  public async collectAndSaveSystemInfo(): Promise<any> {
     try {
+      logger.info('Iniciando recopilación de información del sistema...');
+      
       // Obtener información del sistema y hardware
       const systemInfo = await getSystemInfo();
       const hardwareInfo = await getHardwareInfo();
@@ -44,30 +67,65 @@ export class App {
       // Combinar la información
       const deviceInfo = {
         ...systemInfo,
-        // Ignoramos la información adicional de hardware que no está en el modelo
+        // Se ignora la información adicional de hardware que no está en el modelo
       };
       
       // Guardar en la base de datos
       await saveSystemInfo(deviceInfo);
       
       logger.info(`Información del sistema recopilada y guardada para: ${deviceInfo.computerName}`);
+      return deviceInfo;
     } catch (error) {
       logger.error(`Error al recopilar o guardar información del sistema: ${error}`);
+      throw error;
     }
   }
 
   private scheduleSystemInfoCollection(): void {
+    // Cancelar el trabajo anterior si existe
+    if (this.job) {
+      this.job.cancel();
+    }
+    
     // Programar la recopilación para que se ejecute cada X horas
-    const job = schedule.scheduleJob(`0 */${this.interval} * * *`, async () => {
+    this.job = schedule.scheduleJob(`0 */${this.interval} * * *`, async () => {
       logger.info(`Ejecutando recopilación programada de información del sistema`);
-      await this.collectAndSaveSystemInfo();
+      try {
+        const info = await this.collectAndSaveSystemInfo();
+        
+        // Si las notificaciones están habilitadas y hay una función de callback
+        if (this.notifyEnabled && this.notifyCallback) {
+          this.notifyCallback(
+            'Recopilación Automática', 
+            `Se ha recopilado la información del sistema ${info.computerName} correctamente.`
+          );
+        }
+      } catch (error) {
+        logger.error(`Error en la recopilación programada: ${error}`);
+      }
     });
     
     logger.info(`Recopilación programada cada ${this.interval} horas`);
   }
 
+  // Método para habilitar/deshabilitar notificaciones
+  public setNotificationsEnabled(enabled: boolean): void {
+    this.notifyEnabled = enabled;
+  }
+  
+  // Método para establecer el callback de notificaciones
+  public setNotificationCallback(callback: (title: string, message: string) => void): void {
+    this.notifyCallback = callback;
+  }
+
   public async shutdown(): Promise<void> {
     try {
+      // Cancelar el trabajo programado
+      if (this.job) {
+        this.job.cancel();
+        this.job = null;
+      }
+      
       // Cerrar conexión a la base de datos
       await closeDatabase();
       logger.info('Aplicación detenida correctamente');
