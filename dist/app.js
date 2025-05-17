@@ -32,6 +32,8 @@ const schedule = __importStar(require("node-schedule"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
+const databaseService_1 = require("./services/databaseService");
+const date_formatter_1 = require("./utils/date-formatter"); // Añadir esta importación
 // Eliminamos la importación de electron para evitar confusiones
 // import { app as electronApp } from 'electron';
 class App {
@@ -53,6 +55,8 @@ class App {
         if (!fs.existsSync(logDir)) {
             fs.mkdirSync(logDir, { recursive: true });
         }
+        // Inicializar el servicio de base de datos
+        this.databaseService = new databaseService_1.DatabaseService();
     }
     async initialize() {
         try {
@@ -133,6 +137,35 @@ class App {
         }
         catch (error) {
             logger_1.logger.error(`Error al detener la aplicación: ${error}`);
+        }
+    }
+    // Añadir este método a la clase App
+    async testDateTimeConfiguration() {
+        try {
+            // Mostrar información básica de fecha y hora
+            const now = new Date();
+            logger_1.logger.info(`Fecha del sistema: ${now.toString()}`);
+            logger_1.logger.info(`Timezone offset en minutos: ${now.getTimezoneOffset()}`);
+            // Si tienes DateFormatter disponible
+            if (typeof date_formatter_1.DateFormatter !== 'undefined') {
+                const colombiaDate = date_formatter_1.DateFormatter.getColombiaDate();
+                logger_1.logger.info(`Fecha Colombia: ${colombiaDate.toString()}`);
+            }
+            // Verificar la fecha en la base de datos mediante una consulta simple
+            try {
+                // Crear un registro de prueba
+                const testData = await this.collectAndSaveSystemInfo();
+                logger_1.logger.info(`Registro creado con fechas: ${JSON.stringify({
+                    createdAt: testData.createdAt,
+                    updatedAt: testData.updatedAt
+                })}`);
+            }
+            catch (dbError) {
+                logger_1.logger.error(`Error al verificar fechas en DB: ${dbError}`);
+            }
+        }
+        catch (error) {
+            logger_1.logger.error(`Error en prueba de configuración de fecha/hora: ${error}`);
         }
     }
 }

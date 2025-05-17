@@ -30,6 +30,7 @@ const os = __importStar(require("os"));
 const si = __importStar(require("systeminformation"));
 const node_powershell_1 = require("node-powershell");
 const logger_1 = require("../utils/logger");
+const date_formatter_1 = require("../utils/date-formatter"); // Añadir esta importación
 const execPromise = (0, util_1.promisify)(child_process_1.exec);
 class SystemInfoService {
     async runPowerShellCommand(command) {
@@ -143,6 +144,10 @@ class SystemInfoService {
         const serial = await this.getSerialNumber();
         const mac = await this.getMacAddress();
         return Buffer.from(`${serial}-${mac}`).toString('base64');
+    }
+    // Añadir donde proceses fechas
+    convertToColombiaTime(date) {
+        return date_formatter_1.DateFormatter.getColombiaDate();
     }
     async getSystemInfo() {
         try {

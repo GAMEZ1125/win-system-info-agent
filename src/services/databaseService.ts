@@ -3,6 +3,7 @@ import { dbConfig } from '../config/database';
 import { SystemInfo } from '../models/systemInfo';
 import { SystemInfoAttributes } from '../models/systemInfo';
 import { logger } from '../utils/logger';
+import { DateFormatter } from '../utils/date-formatter';
 
 export class DatabaseService {
   private sequelize: Sequelize;
@@ -16,18 +17,22 @@ export class DatabaseService {
         host: dbConfig.host,
         dialect: 'mysql',
         logging: false,
-        // Configuración de zona horaria para Colombia (GMT-5)
-        timezone: '-05:00',
-        // Configurar dialectOptions para MySQL para asegurar que las fechas se almacenen correctamente
+        // Usar la utilidad para obtener la zona horaria correcta
+        timezone: DateFormatter.getColombiaTimeZoneOffset(),
         dialectOptions: {
           useUTC: false,
+          // Asegurar que las fechas se manejen como strings
           dateStrings: true,
           typeCast: function (field: any, next: any) {
             if (field.type === 'DATETIME' || field.type === 'TIMESTAMP') {
               return field.string();
             }
             return next();
-          }
+          },
+          // Añadir configuración específica para MySQL
+          connectTimeout: 60000,
+          // Añadir configuración explícita de timezone
+          timezone: DateFormatter.getColombiaTimeZoneOffset()
         }
       }
     );
@@ -41,11 +46,16 @@ export class DatabaseService {
       await this.sequelize.authenticate();
       logger.info('Conexión a la base de datos establecida correctamente');
       
-      // Establecer la zona horaria de la sesión a Colombia (GMT-5)
-      await this.sequelize.query("SET time_zone = '-05:00'");
-      logger.info('Zona horaria de la base de datos configurada a GMT-5 (Colombia)');
+      // Establecer timezone con consulta SQL explícita
+      const timeZone = DateFormatter.getColombiaTimeZoneOffset();
+      await this.sequelize.query(`SET time_zone = '${timeZone}'`);
+      logger.info(`Zona horaria de la base de datos configurada a ${timeZone} (Colombia)`);
       
-      // Sincronizar modelos (no forzar recreación de tablas en producción)
+      // Verificar la configuración de timezone actual
+      const [results] = await this.sequelize.query("SELECT @@session.time_zone, @@global.time_zone");
+      logger.info(`Configuración de timezone: ${JSON.stringify(results)}`);
+      
+      // Sincronizar modelos
       await this.sequelize.sync({ alter: true });
       logger.info('Modelos sincronizados con la base de datos');
     } catch (error) {
@@ -85,5 +95,10 @@ export class DatabaseService {
     } catch (error) {
       logger.error(`Error al cerrar la conexión a la base de datos: ${error}`);
     }
+  }
+
+  // Agregar este método a la clase DatabaseService
+  public getSequelize(): Sequelize {
+    return this.sequelize;
   }
 }

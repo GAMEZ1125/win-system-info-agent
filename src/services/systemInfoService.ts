@@ -5,6 +5,7 @@ import * as si from 'systeminformation';
 import { PowerShell } from 'node-powershell';
 import { SystemInfoAttributes } from '../models/systemInfo';
 import { logger } from '../utils/logger';
+import { DateFormatter } from '../utils/date-formatter'; // Añadir esta importación
 
 const execPromise = promisify(exec);
 
@@ -133,6 +134,11 @@ export class SystemInfoService {
     const serial = await this.getSerialNumber();
     const mac = await this.getMacAddress();
     return Buffer.from(`${serial}-${mac}`).toString('base64');
+  }
+
+  // Añadir donde proceses fechas
+  private convertToColombiaTime(date: Date): Date {
+    return DateFormatter.getColombiaDate();
   }
 
   public async getSystemInfo(): Promise<SystemInfoAttributes> {
