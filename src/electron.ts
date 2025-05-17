@@ -130,27 +130,42 @@ function setupIPC() {
 function getIconPath() {
   try {
     // Buscar el icono en varias posibles ubicaciones
-    const iconName = 'icon.ico';
-    const possiblePaths = [
-      // Ruta de desarrollo
-      path.join(__dirname, '..', 'resources', iconName),
-      // Ruta en producción (app.asar)
-      path.join(process.resourcesPath, iconName),
-      // Ruta alternativa en producción
-      path.join(app.getAppPath(), 'resources', iconName),
-      // Otra ruta alternativa
-      path.join(app.getPath('exe'), '..', 'resources', iconName)
-    ];
+    const iconNames = ['icon.ico', 'app.ico', 'tray.ico', 'icon.png', 'app.png'];
+    const possiblePaths = [];
+    
+    // Generar todas las rutas posibles para cada nombre de archivo
+    for (const iconName of iconNames) {
+      possiblePaths.push(
+        // Ruta de desarrollo
+        path.join(__dirname, '..', 'resources', iconName),
+        // Ruta en producción (app.asar)
+        path.join(process.resourcesPath || '', iconName),
+        // Ruta alternativa en producción - directamente en resources
+        path.join(app.getAppPath(), 'resources', iconName),
+        // Ruta para resources en directorio de instalación
+        path.join(path.dirname(process.execPath), 'resources', iconName),
+        // Ruta absoluta para depuración
+        path.join(process.cwd(), 'resources', iconName),
+        // Directamente en la carpeta de la aplicación
+        path.join(app.getAppPath(), iconName),
+        // En extraResources
+        path.join(app.getAppPath(), '..', 'resources', iconName)
+      );
+    }
+    
+    // Registrar todas las rutas que estamos verificando
+    logger.info(`Buscando ícono en ${possiblePaths.length} ubicaciones posibles`);
     
     // Buscar en todas las rutas posibles
     for (const iconPath of possiblePaths) {
       if (fs.existsSync(iconPath)) {
+        logger.info(`Ícono encontrado en: ${iconPath}`);
         return iconPath;
       }
     }
     
-    logger.warn('No se encontró el ícono en ninguna ubicación conocida');
-    // Retornar null en lugar de undefined para facilitar el manejo posterior
+    // Si no se encuentra, registrar todas las rutas que intentamos
+    logger.warn(`No se encontró el ícono en ninguna ubicación. Rutas probadas: ${possiblePaths.join(', ')}`);
     return null;
   } catch (error) {
     logger.error(`Error al buscar el ícono: ${error}`);
@@ -207,23 +222,99 @@ async function stopService() {
 }
 
 function createTray() {
+  // Registrar información de directorios para diagnóstico
+  logger.info(`Directorio actual: ${process.cwd()}`);
+  logger.info(`Directorio de la aplicación: ${app.getAppPath()}`);
+  logger.info(`Directorio de recursos: ${process.resourcesPath || 'no disponible'}`);
+  logger.info(`Ruta del ejecutable: ${process.execPath}`);
+  
   const iconPath = getIconPath();
-  // Corregir el manejo del ícono, proporcionando un ícono por defecto si no se encuentra el archivo
+  logger.info(`Ruta del ícono obtenida: ${iconPath || 'No se encontró'}`);
+  
   let icon: Electron.NativeImage;
   
   if (iconPath) {
-    icon = nativeImage.createFromPath(iconPath);
+    try {
+      // Crear imagen nativa a partir del archivo
+      icon = nativeImage.createFromPath(iconPath);
+      
+      // Verificar si la imagen está vacía
+      if (icon.isEmpty()) {
+        logger.error(`El ícono en ${iconPath} está vacío o no se pudo cargar correctamente`);
+        
+        // Crear un icono genérico si el encontrado está vacío
+        const genericIconBuffer = Buffer.alloc(16 * 16 * 4);
+        for (let i = 0; i < genericIconBuffer.length; i += 4) {
+          // RGBA: azul/verde
+          genericIconBuffer[i] = 0;      // R
+          genericIconBuffer[i + 1] = 120; // G
+          genericIconBuffer[i + 2] = 200; // B
+          genericIconBuffer[i + 3] = 200; // A
+        }
+        icon = nativeImage.createFromBuffer(genericIconBuffer, {
+          width: 16,
+          height: 16
+        });
+        logger.info('Creado icono genérico como fallback');
+      } else {
+        // El icono se cargó correctamente, redimensionarlo específicamente para la bandeja
+        const sizes = icon.getSize();
+        logger.info(`Tamaño original del icono: ${sizes.width}x${sizes.height}`);
+        
+        // Redimensionar a 16x16 para la bandeja del sistema en Windows
+        const resizedIcon = icon.resize({ width: 16, height: 16 });
+        
+        if (!resizedIcon.isEmpty()) {
+          icon = resizedIcon;
+          logger.info('Ícono redimensionado correctamente a 16x16');
+        } else {
+          logger.warn('No se pudo redimensionar el icono, usando original');
+        }
+      }
+    } catch (error) {
+      logger.error(`Error al procesar el ícono: ${error}`);
+      // Crear un icono genérico en caso de error
+      const genericIconBuffer = Buffer.alloc(16 * 16 * 4);
+      for (let i = 0; i < genericIconBuffer.length; i += 4) {
+        // RGBA: rojo (para indicar error)
+        genericIconBuffer[i] = 200;      // R
+        genericIconBuffer[i + 1] = 0;    // G
+        genericIconBuffer[i + 2] = 0;    // B
+        genericIconBuffer[i + 3] = 200;  // A
+      }
+      icon = nativeImage.createFromBuffer(genericIconBuffer, {
+        width: 16,
+        height: 16
+      });
+    }
   } else {
-    // Crear un ícono vacío de 16x16 pixeles como fallback
-    icon = nativeImage.createEmpty();
+    logger.error('No se encontró el archivo de ícono en ninguna ubicación conocida');
+    
+    // Crear un icono genérico cuando no se encuentra el archivo
+    const genericIconBuffer = Buffer.alloc(16 * 16 * 4);
+    for (let i = 0; i < genericIconBuffer.length; i += 4) {
+      // RGBA: gris
+      genericIconBuffer[i] = 150;      // R
+      genericIconBuffer[i + 1] = 150;  // G
+      genericIconBuffer[i + 2] = 150;  // B
+      genericIconBuffer[i + 3] = 200;  // A
+    }
+    icon = nativeImage.createFromBuffer(genericIconBuffer, {
+      width: 16,
+      height: 16
+    });
+    logger.info('Creado icono genérico porque no se encontró un archivo');
   }
   
+  // Crear el tray con el icono preparado
   tray = new Tray(icon);
   tray.setToolTip('System Info Agent');
   updateTrayMenu();
   
   // Cuando se haga doble clic en el ícono del tray, mostrar la ventana de estado
   tray.on('double-click', createWindow);
+  
+  logger.info('Tray creado correctamente');
 }
 
 function updateTrayMenu() {
@@ -592,14 +683,34 @@ function createWindow() {
 
 // Función para mostrar notificaciones informativas no intrusivas
 function showToastNotification(title: string, message: string) {
+  const iconPath = getIconPath();
+  let notificationIcon: Electron.NativeImage | undefined;
+  
+  // Si tenemos un ícono y podemos cargarlo, lo utilizamos
+  if (iconPath) {
+    try {
+      notificationIcon = nativeImage.createFromPath(iconPath);
+      if (notificationIcon.isEmpty()) {
+        logger.warn('El ícono para notificaciones está vacío, se usará ícono por defecto.');
+        notificationIcon = undefined;
+      }
+    } catch (error) {
+      logger.error(`Error al cargar ícono para notificación: ${error}`);
+      notificationIcon = undefined;
+    }
+  }
+  
   // Si no hay una ventana principal o está enfocada, usamos notificaciones nativas
   if (!mainWindow || !mainWindow.isFocused()) {
     const notification = new Notification({
       title,
       body: message,
-      icon: getIconPath() || undefined,
+      icon: notificationIcon,
       silent: false
     });
+    
+    // Log para depuración
+    logger.info(`Mostrando notificación: "${title}" - Ícono: ${iconPath || 'ninguno'}`);
     
     notification.show();
     
