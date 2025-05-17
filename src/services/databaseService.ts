@@ -16,6 +16,19 @@ export class DatabaseService {
         host: dbConfig.host,
         dialect: 'mysql',
         logging: false,
+        // Configuración de zona horaria para Colombia (GMT-5)
+        timezone: '-05:00',
+        // Configurar dialectOptions para MySQL para asegurar que las fechas se almacenen correctamente
+        dialectOptions: {
+          useUTC: false,
+          dateStrings: true,
+          typeCast: function (field: any, next: any) {
+            if (field.type === 'DATETIME' || field.type === 'TIMESTAMP') {
+              return field.string();
+            }
+            return next();
+          }
+        }
       }
     );
     
@@ -27,6 +40,10 @@ export class DatabaseService {
     try {
       await this.sequelize.authenticate();
       logger.info('Conexión a la base de datos establecida correctamente');
+      
+      // Establecer la zona horaria de la sesión a Colombia (GMT-5)
+      await this.sequelize.query("SET time_zone = '-05:00'");
+      logger.info('Zona horaria de la base de datos configurada a GMT-5 (Colombia)');
       
       // Sincronizar modelos (no forzar recreación de tablas en producción)
       await this.sequelize.sync({ alter: true });

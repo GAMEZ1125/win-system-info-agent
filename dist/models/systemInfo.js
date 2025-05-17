@@ -82,10 +82,31 @@ class SystemInfo extends sequelize_1.Model {
                 type: sequelize_1.DataTypes.STRING,
                 allowNull: false,
             },
+            created_at: {
+                type: sequelize_1.DataTypes.DATE,
+                defaultValue: sequelize_1.Sequelize.literal('CURRENT_TIMESTAMP'),
+            },
+            updated_at: {
+                type: sequelize_1.DataTypes.DATE,
+                defaultValue: sequelize_1.Sequelize.literal('CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'),
+            }
         }, {
             sequelize,
             tableName: 'system_info',
             timestamps: true,
+            createdAt: 'created_at',
+            updatedAt: 'updated_at',
+            hooks: {
+                beforeCreate: (record) => {
+                    const colombiaDate = new Date();
+                    record.dataValues.created_at = colombiaDate;
+                    record.dataValues.updated_at = colombiaDate;
+                },
+                beforeUpdate: (record) => {
+                    const colombiaDate = new Date();
+                    record.dataValues.updated_at = colombiaDate;
+                }
+            }
         });
     }
 }

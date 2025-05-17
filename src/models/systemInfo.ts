@@ -127,11 +127,32 @@ export class SystemInfo extends Model<SystemInfoAttributes> implements SystemInf
           type: DataTypes.STRING,
           allowNull: false,
         },
+        created_at: {
+          type: DataTypes.DATE,
+          defaultValue: Sequelize.literal('CURRENT_TIMESTAMP'),
+        },
+        updated_at: {
+          type: DataTypes.DATE,
+          defaultValue: Sequelize.literal('CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'),
+        }
       },
       {
         sequelize,
         tableName: 'system_info',
         timestamps: true,
+        createdAt: 'created_at',
+        updatedAt: 'updated_at',
+        hooks: {
+          beforeCreate: (record: any) => {
+            const colombiaDate = new Date();
+            record.dataValues.created_at = colombiaDate;
+            record.dataValues.updated_at = colombiaDate;
+          },
+          beforeUpdate: (record: any) => {
+            const colombiaDate = new Date();
+            record.dataValues.updated_at = colombiaDate;
+          }
+        }
       }
     );
   }
