@@ -60,10 +60,12 @@ else {
     });
     // Crea la ventana principal y la bandeja cuando Electron esté listo
     electron_1.app.whenReady().then(() => {
+        // Registrar el manejador IPC una sola vez al inicio
+        setupCollectInfoHandler();
+        // Continuar con la inicialización normal
+        setupIPC(); // Ahora esta función no registra collect-system-info
         createTray();
         checkServiceStatus();
-        // Configurar IPC para recibir mensajes desde la ventana
-        setupIPC();
         electron_1.app.on('activate', function () {
             // En macOS es común re-crear una ventana en la aplicación cuando
             // el ícono del dock es clickeado y no hay otras ventanas abiertas.
@@ -125,10 +127,8 @@ async function collectSystemInfo() {
 }
 // Configurar IPC para comunicación entre proceso principal y renderer
 function setupIPC() {
-    // Manejar la solicitud de actualizar manualmente la información del sistema
-    electron_1.ipcMain.handle('collect-system-info', async () => {
-        return await collectSystemInfo();
-    });
+    // Este espacio queda disponible para otros manejadores globales que no sean específicos de ventanas
+    logger_1.logger.info('Configuración IPC general inicializada');
 }
 function getIconPath() {
     try {
@@ -410,249 +410,1503 @@ function updateTrayMenu() {
     ]);
     tray.setContextMenu(menu);
 }
-// Modificar la función createWindow para agregar un botón de recopilación manual
+// Modificar la función createWindow()
 function createWindow() {
-    // Evita crear múltiples ventanas
+    // Evitar crear múltiples ventanas
     if (mainWindow) {
         mainWindow.show();
         return;
     }
-    // Obtener la ruta del icono y manejar el caso null
+    // Definir constante para intervalo de actualización
+    const intervalHours = 6;
+    // Obtener la ruta del icono
     const iconPath = getIconPath();
-    // Convertir null a undefined para satisfacer el tipo esperado
     const iconOption = iconPath || undefined;
     mainWindow = new electron_1.BrowserWindow({
-        width: 500,
-        height: 450,
-        resizable: false,
+        width: 900,
+        height: 680,
+        resizable: true,
         icon: iconOption,
         webPreferences: {
             nodeIntegration: true,
-            contextIsolation: false
-        }
+            contextIsolation: false,
+            devTools: true,
+            webSecurity: false // Permite carga de recursos locales
+        },
+        backgroundColor: '#202020',
+        show: false,
+        autoHideMenuBar: true,
+        titleBarStyle: 'hidden',
+        frame: false,
     });
-    // HTML modificado para incluir el botón de recopilación manual
-    mainWindow.loadURL(`data:text/html;charset=utf-8,
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <title>System Info Agent</title>
-      <style>
-        body {
-          font-family: Arial, sans-serif;
-          margin: 0;
-          padding: 20px;
-          background-color: #f5f5f5;
-          color: #333;
+    // En lugar de cargar HTML desde data:uri, crear y cargar un archivo HTML temporal
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    // Crear directorio temporal si no existe
+    const tempDir = path.join(os.tmpdir(), 'systeminfo-agent');
+    if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+    }
+    // Crear archivo HTML temporal
+    const htmlPath = path.join(tempDir, 'dashboard.html');
+    // Contenido HTML (usar el mismo HTML que tenías antes)
+    const htmlContent = `<!DOCTYPE html>
+  <html lang="es">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SystemInfoAgent Dashboard</title>
+    <style>
+      /* Aquí todo tu CSS existente */
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 var(--accent-alpha); }
+        70% { box-shadow: 0 0 0 10px rgba(0, 0, 0, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0); }
+      }
+      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      :root {
+        --background: #202020;
+        --card-bg: #2d2d2d;
+        --text: #e0e0e0;
+        --text-secondary: #a0a0a0;
+        --accent: #0078D4;
+        --accent-hover: #1a86d9;
+        --accent-active: #0069c0;
+        --accent-alpha: rgba(0, 120, 212, 0.7);
+        --danger: #e74c3c;
+        --danger-hover: #c0392b;
+        --success: #2ecc71;
+        --success-light-bg: rgba(46, 204, 113, 0.2);
+        --error: #e74c3c;
+        --error-light-bg: rgba(231, 76, 60, 0.2);
+        --warning: #f39c12;
+        --warning-light-bg: rgba(241, 196, 15, 0.2);
+        --border: rgba(255, 255, 255, 0.1);
+        --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        --card-shadow-hover: 0 8px 16px rgba(0, 0, 0, 0.3);
+        --titlebar-bg: #1a1a1a;
+      }
+      
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: 'Segoe UI', sans-serif;
+        user-select: none;
+      }
+      
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: var(--background);
+        color: var(--text);
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        height: 100vh;
+      }
+      
+      #app-container {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      
+      .title-bar {
+        height: 32px;
+        background-color: var(--titlebar-bg);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 10px;
+        -webkit-app-region: drag;
+        border-bottom: 1px solid var(--border);
+      }
+      
+      .app-title {
+        color: var(--text);
+        font-size: 12px;
+        opacity: 0.7;
+      }
+      
+      .title-bar-buttons {
+        display: flex;
+        -webkit-app-region: no-drag;
+      }
+      
+      .title-button {
+        width: 46px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background-color 0.2s;
+        font-family: 'Segoe MDL2 Assets', 'Segoe UI Symbol';
+        color: var(--text);
+        cursor: pointer;
+      }
+      
+      .title-button:hover {
+        background-color: rgba(127, 127, 127, 0.2);
+      }
+      
+      #close-button:hover {
+        background-color: var(--danger);
+        color: white;
+      }
+      
+      .app-body {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+      }
+      
+      .sidebar {
+        width: 220px;
+        background-color: rgba(45, 45, 45, 0.7);
+        backdrop-filter: blur(10px);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        padding-top: 15px;
+      }
+      
+      .nav-logo {
+        padding: 10px 20px 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      
+      .nav-logo img {
+        width: 32px;
+        height: 32px;
+      }
+      
+      .nav-logo-text {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      
+      .nav-menu {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        flex: 1;
+      }
+      
+      .nav-item {
+        padding: 10px 15px;
+        margin: 5px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        transition: all 0.2s ease;
+      }
+      
+      .nav-item:hover {
+        background-color: rgba(255, 255, 255, 0.08);
+      }
+      
+      .nav-item.active {
+        background-color: rgba(0, 120, 212, 0.2);
+        color: var(--accent);
+      }
+      
+      .nav-item-icon {
+        font-family: 'Segoe MDL2 Assets', 'Segoe UI Symbol';
+        font-size: 16px;
+      }
+      
+      .nav-footer {
+        padding: 15px;
+        border-top: 1px solid var(--border);
+        font-size: 11px;
+        color: var(--text-secondary);
+        text-align: center;
+      }
+      
+      .nav-footer a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      
+      .content {
+        flex: 1;
+        padding: 20px;
+        overflow-y: auto;
+        position: relative;
+      }
+      
+      .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+      
+      .card {
+        background-color: var(--card-bg);
+        border-radius: 8px;
+        box-shadow: var(--card-shadow);
+        padding: 20px;
+        transition: all 0.3s ease;
+        animation: fadeIn 0.5s ease forwards;
+        animation-delay: calc(var(--delay) * 0.1s);
+        opacity: 0;
+      }
+      
+      .card:hover {
+        box-shadow: var(--card-shadow-hover);
+        transform: translateY(-2px);
+      }
+      
+      .card-title {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 15px;
+        color: var(--accent);
+        display: flex;
+        align-items: center;
+      }
+      
+      .card-title-icon {
+        margin-right: 8px;
+        font-family: 'Segoe MDL2 Assets', 'Segoe UI Symbol';
+        font-size: 18px;
+      }
+      
+      .status-value {
+        padding: 10px;
+        border-radius: 6px;
+        margin-bottom: 15px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        transition: all 0.3s ease;
+      }
+      
+      .status-icon {
+        margin-right: 10px;
+        font-size: 16px;
+        width: 20px;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      
+      .running {
+        background-color: var(--success-light-bg);
+        color: var(--success);
+      }
+      
+      .stopped {
+        background-color: var(--error-light-bg);
+        color: var(--error);
+      }
+      
+      .unknown {
+        background-color: var(--warning-light-bg);
+        color: var(--warning);
+      }
+      
+      .button {
+        background-color: var(--accent);
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 10px 16px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        outline: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+      
+      .button:hover {
+        background-color: var(--accent-hover);
+      }
+      
+      .button:active {
+        background-color: var(--accent-active);
+        transform: scale(0.98);
+      }
+      
+      .button:disabled {
+        background-color: rgba(127, 127, 127, 0.3);
+        color: rgba(127, 127, 127, 0.7);
+        cursor: not-allowed;
+      }
+      
+      .button.secondary {
+        background-color: transparent;
+        color: var(--accent);
+        border: 1px solid var(--accent);
+      }
+      
+      .button.secondary:hover {
+        background-color: rgba(0, 120, 212, 0.05);
+      }
+      
+      .button.danger {
+        background-color: var(--danger);
+      }
+      
+      .button.danger:hover {
+        background-color: var(--danger-hover);
+      }
+      
+      .button-row {
+        display: flex;
+        gap: 10px;
+        margin-top: 10px;
+        flex-wrap: wrap;
+      }
+      
+      .countdown-container {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      
+      .countdown-title {
+        font-size: 16px;
+        color: var(--text);
+        margin-bottom: 15px;
+      }
+      
+      .countdown {
+        display: flex;
+        justify-content: center;
+        gap: 15px;
+      }
+      
+      .countdown-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      
+      .countdown-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--accent);
+        background-color: rgba(0, 120, 212, 0.1);
+        border-radius: 8px;
+        width: 60px;
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 5px;
+        position: relative;
+        overflow: hidden;
+      }
+      
+      .countdown-label {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      
+      .info-item {
+        display: flex;
+        align-items: center;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      
+      .info-label {
+        flex: 1;
+        color: var(--text-secondary);
+      }
+      
+      .info-value {
+        font-weight: 500;
+      }
+      
+      .section-title {
+        font-size: 18px;
+        margin: 30px 0 15px;
+        color: var(--text);
+        position: relative;
+        padding-bottom: 8px;
+      }
+      
+      .section-title::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 40px;
+        height: 3px;
+        background-color: var(--accent);
+        border-radius: 3px;
+      }
+      
+      .tab-content {
+        display: none;
+      }
+      
+      .tab-content.active {
+        display: block;
+        animation: fadeIn 0.3s ease forwards;
+      }
+      
+      .spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: white;
+        animation: spin 1s linear infinite;
+        margin-right: 8px;
+      }
+      
+      .collect-btn {
+        width: 100%;
+        margin-top: 20px;
+        animation: pulse 2s infinite;
+      }
+      
+      .developer-card {
+        background-color: #242932;
+        border-radius: 10px;
+        display: flex;
+        padding: 5px;
+        align-items: center;
+        margin-top: 20px;
+        border: 1px solid #353e4c;
+      }
+      
+      .dev-logo {
+        width: 80px;
+        height: 80px;
+        border-radius: 8px;
+        overflow: hidden;
+        margin-right: 15px;
+      }
+      
+      .dev-logo img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      
+      .dev-info {
+        flex: 1;
+      }
+      
+      .dev-name {
+        font-weight: 600;
+        font-size: 16px;
+        margin-bottom: 5px;
+        color: var(--text);
+      }
+      
+      .dev-description {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 10px;
+      }
+      
+      .dev-link {
+        display: inline-block;
+        color: var(--accent);
+        font-size: 14px;
+        text-decoration: none;
+      }
+      
+      .toast-container {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 1000;
+      }
+      
+      .toast {
+        background-color: rgba(45, 45, 45, 0.9);
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        display: flex;
+        flex-direction: column;
+        animation: toast-in 0.3s ease forwards;
+        max-width: 300px;
+        backdrop-filter: blur(10px);
+      }
+      
+      @keyframes toast-in {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      
+      .toast-title {
+        font-weight: 600;
+        margin-bottom: 5px;
+      }
+      
+      .toast-message {
+        font-size: 14px;
+        opacity: 0.9;
+      }
+      
+      #loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        backdrop-filter: blur(5px);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        pointer-events: none;
+      }
+      
+      #loading-overlay.visible {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      
+      .loading-spinner {
+        width: 50px;
+        height: 50px;
+        border: 4px solid rgba(255, 255, 255, 0.1);
+        border-radius: 50%;
+        border-top: 4px solid var(--accent);
+        animation: spin 1s linear infinite;
+      }
+      
+      .system-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+      }
+      
+      .stat-card {
+        background-color: rgba(45, 45, 45, 0.8);
+        border-radius: 8px;
+        padding: 15px;
+        display: flex;
+        flex-direction: column;
+        transition: all 0.2s ease;
+      }
+      
+      .stat-card:hover {
+        background-color: rgba(55, 55, 55, 0.8);
+        transform: translateY(-3px);
+      }
+      
+      .stat-label {
+        font-size: 14px;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+      }
+      
+      .stat-value {
+        font-size: 20px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      
+      .stat-icon {
+        align-self: flex-end;
+        font-family: 'Segoe MDL2 Assets', 'Segoe UI Symbol';
+        font-size: 24px;
+        color: var(--accent);
+        margin-top: -30px;
+        opacity: 0.5;
+      }
+      
+      /* Responsive */
+      @media (max-width: 768px) {
+        .dashboard-grid {
+          grid-template-columns: 1fr;
         }
-        h1 {
-          font-size: 22px;
-          margin-bottom: 20px;
+        
+        .countdown-value {
+          width: 50px;
+          height: 50px;
+          font-size: 24px;
         }
-        .logo {
-          text-align: center;
-          margin-bottom: 20px;
-        }
-        .logo img {
-          width: 80px;
-          height: 80px;
-        }
-        .status-panel {
-          background-color: white;
-          border-radius: 5px;
-          padding: 15px;
-          margin-bottom: 20px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .status-label {
-          font-weight: bold;
-          margin-bottom: 5px;
-        }
-        .status-value {
-          padding: 8px;
-          margin-bottom: 10px;
-          border-radius: 3px;
-        }
-        .running {
-          background-color: #d4edda;
-          color: #155724;
-        }
-        .stopped {
-          background-color: #f8d7da;
-          color: #721c24;
-        }
-        .unknown {
-          background-color: #fff3cd;
-          color: #856404;
-        }
-        .button-row {
-          display: flex;
-          justify-content: space-between;
-          margin-top: 20px;
-        }
-        button {
-          padding: 8px 16px;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-weight: bold;
-        }
-        .start-btn {
-          background-color: #28a745;
-          color: white;
-        }
-        .stop-btn {
-          background-color: #dc3545;
-          color: white;
-        }
-        .status-btn {
-          background-color: #17a2b8;
-          color: white;
-        }
-        .install-btn {
-          background-color: #6c757d;
-          color: white;
-        }
-        .uninstall-btn {
-          background-color: #6c757d;
-          color: white;
-        }
-        button:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-        .collect-btn {
-          background-color: #007bff;
-          color: white;
-          width: 100%;
-          margin-top: 10px;
-        }
-        .footer {
-          margin-top: 20px;
-          font-size: 12px;
-          color: #6c757d;
-          text-align: center;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="logo">
-        <h1>System Info Agent</h1>
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-container">
+      <!-- Barra de título personalizada -->
+      <div class="title-bar">
+        <div class="app-title">SystemInfoAgent Dashboard</div>
+        <div class="title-bar-buttons">
+          <div id="minimize-button" class="title-button">&#xE921;</div>
+          <div id="close-button" class="title-button">&#xE8BB;</div>
+        </div>
       </div>
       
-      <div class="status-panel">
-        <div class="status-label">Estado del Servicio:</div>
-        <div id="serviceStatus" class="status-value ${serviceStatus === 'running' ? 'running' :
-        serviceStatus === 'stopped' ? 'stopped' : 'unknown'}">
-          ${serviceStatus === 'running' ? 'En ejecución' :
-        serviceStatus === 'stopped' ? 'Detenido' : 'Estado desconocido'}
+      <div class="app-body">
+        <!-- Sidebar -->
+        <div class="sidebar">
+          <div class="nav-logo">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMjAgMkM5Ljk1IDIgMiA5Ljk1IDIgMjBDMiAzMC4wNSA5Ljk1IDM4IDIwIDM4QzMwLjA1IDM4IDM4IDMwLjA1IDM4IDIwQzM4IDkuOTUgMzAuMDUgMiAyMCAyWk0yNiAyMkgyMlYyNkgyMFYyMkgxNlYyMEgyMFYxNkgyMlYyMEgyNlYyMloiIGZpbGw9IiMwMDc4RDQiLz48L3N2Zz4=" alt="Logo">
+            <div class="nav-logo-text">SystemInfoAgent</div>
+          </div>
+          
+          <ul class="nav-menu">
+            <li class="nav-item active" data-tab="dashboard">
+              <span class="nav-item-icon">&#xE80F;</span>
+              <span>Dashboard</span>
+            </li>
+            <li class="nav-item" data-tab="status">
+              <span class="nav-item-icon">&#xE7BA;</span>
+              <span>Estado del Servicio</span>
+            </li>
+            <li class="nav-item" data-tab="config">
+              <span class="nav-item-icon">&#xE713;</span>
+              <span>Configuración</span>
+            </li>
+            <li class="nav-item" data-tab="about">
+              <span class="nav-item-icon">&#xE946;</span>
+              <span>Acerca de</span>
+            </li>
+          </ul>
+          
+          <div class="nav-footer">
+            <div>SystemInfoAgent v1.0.0</div>
+            <div style="margin-top: 5px;">
+              <a href="https://gamezsolutions.netlify.app/" target="_blank">Gamez Code Solutions</a>
+            </div>
+          </div>
         </div>
         
-        <div class="button-row">
-          <button id="startBtn" class="start-btn" ${serviceStatus !== 'stopped' ? 'disabled' : ''}>
-            Iniciar Servicio
-          </button>
-          <button id="stopBtn" class="stop-btn" ${serviceStatus !== 'running' ? 'disabled' : ''}>
-            Detener Servicio
-          </button>
-          <button id="refreshBtn" class="status-btn">
-            Actualizar Estado
-          </button>
-        </div>
-      </div>
-      
-      <div class="status-panel">
-        <div class="status-label">Opciones de Servicio:</div>
-        <div class="button-row">
-          <button id="installBtn" class="install-btn" ${serviceStatus !== 'unknown' ? 'disabled' : ''}>
-            Instalar Servicio
-          </button>
-          <button id="uninstallBtn" class="uninstall-btn" ${serviceStatus === 'unknown' ? 'disabled' : ''}>
-            Desinstalar Servicio
-          </button>
-        </div>
-        
-        <button id="collectBtn" class="collect-btn">
-          Ejecutar Recopilación de Información Ahora
-        </button>
-      </div>
-      
-      <div class="footer">
-        SystemInfoAgent v1.0.0
-      </div>
-      
-      <script>
-        // Obtener referencias a los botones (existentes)
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const refreshBtn = document.getElementById('refreshBtn');
-        const installBtn = document.getElementById('installBtn');
-        const uninstallBtn = document.getElementById('uninstallBtn');
-        const serviceStatusElement = document.getElementById('serviceStatus');
-        const collectBtn = document.getElementById('collectBtn');
-        
-        // Acceso a la API de Node.js y Electron
-        const { ipcRenderer } = require('electron');
-        const { exec } = require('child_process');
-        const util = require('util');
-        const execAsync = util.promisify(exec);
-        
-        // Función para actualizar el UI
-        function updateUI(status) {
-          serviceStatusElement.className = 'status-value ' + 
-            (status === 'running' ? 'running' : status === 'stopped' ? 'stopped' : 'unknown');
-          
-          serviceStatusElement.textContent = 
-            status === 'running' ? 'En ejecución' : 
-            status === 'stopped' ? 'Detenido' : 'Estado desconocido';
-          
-          startBtn.disabled = status !== 'stopped';
-          stopBtn.disabled = status !== 'running';
-          installBtn.disabled = status !== 'unknown';
-          uninstallBtn.disabled = status === 'unknown';
-        }
-        
-        // Manejar los eventos de los botones existentes...
-        
-        // Nuevo evento para el botón de recopilación manual
-        collectBtn.addEventListener('click', async () => {
-          collectBtn.disabled = true;
-          collectBtn.textContent = 'Recopilando información...';
-          
-          try {
-            // Utilizar IPC para comunicarse con el proceso principal
-            const result = await ipcRenderer.invoke('collect-system-info');
+        <!-- Contenido principal -->
+        <div class="content">
+          <!-- Dashboard Tab -->
+          <div id="dashboard-tab" class="tab-content active">
+            <!-- Información del sistema -->
+            <div class="countdown-container">
+              <div class="countdown-title">Próxima actualización en:</div>
+              <div class="countdown">
+                <div class="countdown-item">
+                  <div class="countdown-value" id="hours">00</div>
+                  <div class="countdown-label">Horas</div>
+                </div>
+                <div class="countdown-item">
+                  <div class="countdown-value" id="minutes">00</div>
+                  <div class="countdown-label">Minutos</div>
+                </div>
+                <div class="countdown-item">
+                  <div class="countdown-value" id="seconds">00</div>
+                  <div class="countdown-label">Segundos</div>
+                </div>
+              </div>
+            </div>
             
-            if (result.success) {
-              // Crear una notificación en lugar de un alert
-              const notification = new Notification('Recopilación de información', {
-                body: 'La información del sistema ha sido recopilada y guardada correctamente.'
-              });
-            } else {
-              // Para errores, mejor mantener un alert para asegurarse que el usuario lo ve
-              alert('Error al recopilar información: ' + result.message);
-            }
-          } catch (error) {
-            alert('Error al ejecutar la recopilación: ' + error.message);
-          } finally {
-            collectBtn.disabled = false;
-            collectBtn.textContent = 'Ejecutar Recopilación de Información Ahora';
-          }
+            <button id="collectBtn" class="button collect-btn">
+              <span class="spinner"></span>
+              <span>Ejecutar Recopilación Ahora</span>
+            </button>
+            
+            <h2 class="section-title">Información del Sistema</h2>
+            
+            <div class="system-stats">
+              <div class="stat-card">
+                <div class="stat-label">Sistema Operativo</div>
+                <div class="stat-value" id="os-info">Cargando...</div>
+                <div class="stat-icon">&#xE7BA;</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Procesador</div>
+                <div class="stat-value" id="cpu-info">Cargando...</div>
+                <div class="stat-icon">&#xE950;</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Memoria RAM</div>
+                <div class="stat-value" id="ram-info">Cargando...</div>
+                <div class="stat-icon">&#xE950;</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">IP / MAC</div>
+                <div class="stat-value" id="network-info">Cargando...</div>
+                <div class="stat-icon">&#xE839;</div>
+              </div>
+            </div>
+            
+            <h2 class="section-title">Estado del Servicio</h2>
+            
+            <div class="card">
+              <div class="card-title">
+                <span class="card-title-icon">&#xE7BA;</span>
+                SystemInfoAgent
+              </div>
+              
+              <div id="serviceStatus" class="status-value ${serviceStatus === 'running' ? 'running' :
+        serviceStatus === 'stopped' ? 'stopped' : 'unknown'}">
+                <span class="status-icon">
+                  ${serviceStatus === 'running' ? '&#xE930;' :
+        serviceStatus === 'stopped' ? '&#xE71A;' : '&#xE9CE;'}
+                </span>
+                ${serviceStatus === 'running' ? 'En ejecución' :
+        serviceStatus === 'stopped' ? 'Detenido' : 'Estado desconocido'}
+              </div>
+              
+              <div class="button-row">
+                <button id="startBtn" class="button" ${serviceStatus !== 'stopped' ? 'disabled' : ''}>
+                  <span class="spinner"></span>
+                  <span>Iniciar Servicio</span>
+                </button>
+                <button id="stopBtn" class="button danger" ${serviceStatus !== 'running' ? 'disabled' : ''}>
+                  <span class="spinner"></span>
+                  <span>Detener Servicio</span>
+                </button>
+                <button id="refreshBtn" class="button secondary" title="Actualizar estado del servicio">
+                  <span class="spinner"></span>
+                  <span>&#xE72C;</span>
+                </button>
+              </div>
+            </div>
+            
+            <h2 class="section-title">Desarrollado por</h2>
+            
+            <div class="developer-card">
+              <div class="dev-logo">
+                <img src="https://gamezsolutions.netlify.app/assets/logo-02caf29c.png" alt="Gamez Code Solutions">
+              </div>
+              <div class="dev-info">
+                <div class="dev-name">Gamez Code Solutions</div>
+                <div class="dev-description">Soluciones de software para empresas y negocios.</div>
+                <a href="https://gamezsolutions.netlify.app/" class="dev-link" target="_blank">
+                  Visitar sitio web
+                </a>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Tab de Estado del Servicio -->
+          <div id="status-tab" class="tab-content">
+            <h2 class="section-title">Control del Servicio</h2>
+            
+            <div class="dashboard-grid">
+              <div class="card">
+                <div class="card-title">
+                  <span class="card-title-icon">&#xE7BA;</span>
+                  Estado del Servicio
+                </div>
+                
+                <div id="serviceStatus2" class="status-value ${serviceStatus === 'running' ? 'running' :
+        serviceStatus === 'stopped' ? 'stopped' : 'unknown'}">
+                  <span class="status-icon">
+                    ${serviceStatus === 'running' ? '&#xE930;' :
+        serviceStatus === 'stopped' ? '&#xE71A;' : '&#xE9CE;'}
+                  </span>
+                  ${serviceStatus === 'running' ? 'En ejecución' :
+        serviceStatus === 'stopped' ? 'Detenido' : 'Estado desconocido'}
+                </div>
+                
+                <div class="button-row">
+                  <button id="startBtn2" class="button" ${serviceStatus !== 'stopped' ? 'disabled' : ''}>
+                    <span class="spinner"></span>
+                    <span>Iniciar Servicio</span>
+                  </button>
+                  <button id="stopBtn2" class="button danger" ${serviceStatus !== 'running' ? 'disabled' : ''}>
+                    <span class="spinner"></span>
+                    <span>Detener Servicio</span>
+                  </button>
+                  <button id="refreshBtn2" class="button secondary" title="Actualizar estado del servicio">
+                    <span class="spinner"></span>
+                    <span>&#xE72C;</span>
+                  </button>
+                </div>
+              </div>
+              
+              <div class="card">
+                <div class="card-title">
+                  <span class="card-title-icon">&#xE713;</span>
+                  Opciones de Servicio
+                </div>
+                
+                <div class="button-row">
+                  <button id="installBtn" class="button secondary" ${serviceStatus !== 'unknown' ? 'disabled' : ''}>
+                    <span class="spinner"></span>
+                    <span>Instalar Servicio</span>
+                  </button>
+                  <button id="uninstallBtn" class="button secondary" ${serviceStatus === 'unknown' ? 'disabled' : ''}>
+                    <span class="spinner"></span>
+                    <span>Desinstalar Servicio</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            <h2 class="section-title">Últimos eventos</h2>
+            <div class="card">
+              <div id="events-container">
+                <div class="info-item">
+                  <div class="info-label">Cargando eventos...</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Tab de Configuración -->
+          <div id="config-tab" class="tab-content">
+            <h2 class="section-title">Configuración</h2>
+            
+            <div class="card">
+              <div class="card-title">
+                <span class="card-title-icon">&#xE713;</span>
+                Opciones de Sincronización
+              </div>
+              
+              <div class="info-item">
+                <div class="info-label">Intervalo de actualización</div>
+                <div class="info-value">${intervalHours} horas</div>
+              </div>
+              
+              <div class="info-item">
+                <div class="info-label">Servidor remoto</div>
+                <div class="info-value" id="server-address">Cargando...</div>
+              </div>
+              
+              <div class="button-row" style="margin-top: 20px;">
+                <button id="testConnectionBtn" class="button secondary">
+                  Probar Conexión
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Tab de Acerca de -->
+          <div id="about-tab" class="tab-content">
+            <h2 class="section-title">Acerca de SystemInfoAgent</h2>
+            
+            <div class="card">
+              <div class="info-item">
+                <div class="info-label">Versión</div>
+                <div class="info-value">1.0.0</div>
+              </div>
+              
+              <div class="info-item">
+                <div class="info-label">Plataforma</div>
+                <div class="info-value">Windows</div>
+              </div>
+              
+              <div class="info-item">
+                <div class="info-label">Arquitectura</div>
+                <div class="info-value" id="arch-info">Cargando...</div>
+              </div>
+              
+              <div class="info-item">
+                <div class="info-label">Directorio de logs</div>
+                <div class="info-value" id="log-path">Cargando...</div>
+              </div>
+            </div>
+            
+            <h2 class="section-title">Desarrollado por</h2>
+            
+            <div class="developer-card">
+              <div class="dev-logo">
+                <img src="https://gamezsolutions.netlify.app/assets/logo-02caf29c.png" alt="Gamez Code Solutions">
+              </div>
+              <div class="dev-info">
+                <div class="dev-name">Gamez Code Solutions</div>
+                <div class="dev-description">Desarrollo de software personalizado. Especialistas en soluciones empresariales y herramientas de recolección de datos.</div>
+                <a href="https://gamezsolutions.netlify.app/" class="dev-link" target="_blank">
+                  Visitar sitio web
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div id="toast-container" class="toast-container"></div>
+    <div id="loading-overlay"><div class="loading-spinner"></div></div>
+    
+    <script>
+      // Obtener referencia a los elementos del DOM
+      const startBtn = document.getElementById('startBtn');
+      const stopBtn = document.getElementById('stopBtn');
+      const refreshBtn = document.getElementById('refreshBtn');
+      const installBtn = document.getElementById('installBtn');
+      const uninstallBtn = document.getElementById('uninstallBtn');
+      const collectBtn = document.getElementById('collectBtn');
+      const minimizeButton = document.getElementById('minimize-button');
+      const closeButton = document.getElementById('close-button');
+      const serviceStatusElement = document.getElementById('serviceStatus');
+      const serviceStatusElement2 = document.getElementById('serviceStatus2');
+      
+      // Referencias a elementos adicionales del Status Tab
+      const startBtn2 = document.getElementById('startBtn2');
+      const stopBtn2 = document.getElementById('stopBtn2');
+      const refreshBtn2 = document.getElementById('refreshBtn2');
+      
+      // Referencias a elementos de información
+      const osInfoElement = document.getElementById('os-info');
+      const cpuInfoElement = document.getElementById('cpu-info');
+      const ramInfoElement = document.getElementById('ram-info');
+      const networkInfoElement = document.getElementById('network-info');
+      const serverAddressElement = document.getElementById('server-address');
+      const archInfoElement = document.getElementById('arch-info');
+      const logPathElement = document.getElementById('log-path');
+      const eventsContainer = document.getElementById('events-container');
+      
+      // Acceso a la API de Node.js y Electron
+      const { ipcRenderer } = require('electron');
+      const { exec } = require('child_process');
+      const os = require('os');
+      const path = require('path');
+      const util = require('util');
+      const execAsync = util.promisify(exec);
+      
+      // Variables para el temporizador
+      const intervalHours = ${intervalHours}; // Horas del intervalo de recopilación
+      let nextUpdateTime = new Date();
+      let countdownInterval;
+      
+      // Función para cambiar entre tabs
+      function switchTab(tabId) {
+        // Ocultar todos los tabs
+        document.querySelectorAll('.tab-content').forEach(tab => {
+          tab.classList.remove('active');
         });
         
-        // Resto del script JavaScript...
-      </script>
-    </body>
-    </html>
-  `);
+        // Desactivar todos los items del menú
+        document.querySelectorAll('.nav-item').forEach(item => {
+          item.classList.remove('active');
+        });
+        
+        // Mostrar el tab seleccionado
+        document.getElementById(tabId + '-tab').classList.add('active');
+        
+        // Activar el item de menú correspondiente
+        document.querySelector('.nav-item[data-tab="' + tabId + '"]').classList.add('active');
+      }
+      
+      // Función para mostrar/ocultar el overlay de carga
+      function toggleLoading(show) {
+        const overlay = document.getElementById('loading-overlay');
+        if (show) {
+          overlay.classList.add('visible');
+        } else {
+          overlay.classList.remove('visible');
+        }
+      }
+      
+      // Función para actualizar el UI con el estado del servicio
+      function updateUI(status) {
+        // Actualizar ambas instancias del estado del servicio
+        [serviceStatusElement, serviceStatusElement2].forEach(el => {
+          if (!el) return;
+          
+          // Actualizar clases y texto
+          el.className = 'status-value ' + 
+            (status === 'running' ? 'running' : status === 'stopped' ? 'stopped' : 'unknown');
+          
+          el.innerHTML = \`
+            <span class="status-icon">
+              \${status === 'running' ? '&#xE930;' : status === 'stopped' ? '&#xE71A;' : '&#xE9CE;'}
+            </span>
+            \${status === 'running' ? 'En ejecución' : status === 'stopped' ? 'Detenido' : 'Estado desconocido'}
+          \`;
+        });
+        
+        // Actualizar estado de todos los botones
+        [startBtn, startBtn2].forEach(btn => {
+          if (btn) btn.disabled = status !== 'stopped';
+        });
+        
+        [stopBtn, stopBtn2].forEach(btn => {
+          if (btn) btn.disabled = status !== 'running';
+        });
+        
+        if (installBtn) installBtn.disabled = status !== 'unknown';
+        if (uninstallBtn) uninstallBtn.disabled = status === 'unknown';
+        
+        // Iniciar o detener el temporizador según el estado
+        if (status === 'running') {
+          startCountdown();
+        } else if (countdownInterval) {
+          clearInterval(countdownInterval);
+          resetCountdown();
+        }
+      }
+      
+      // Función para reiniciar el contador a ceros
+      function resetCountdown() {
+        document.getElementById('hours').textContent = '00';
+        document.getElementById('minutes').textContent = '00';
+        document.getElementById('seconds').textContent = '00';
+      }
+      
+      // Función para iniciar el temporizador de cuenta regresiva
+      function startCountdown() {
+        // Calcular la próxima hora de actualización
+        nextUpdateTime = new Date();
+        nextUpdateTime.setHours(nextUpdateTime.getHours() + intervalHours);
+        
+        // Limpiar el intervalo anterior
+        if (countdownInterval) {
+          clearInterval(countdownInterval);
+        }
+        
+        // Actualizar el contador cada segundo
+        countdownInterval = setInterval(updateCountdown, 1000);
+        updateCountdown(); // Actualizar inmediatamente
+      }
+      
+      // Función para actualizar el contador
+      function updateCountdown() {
+        const now = new Date();
+        const diff = nextUpdateTime.getTime() - now.getTime();
+        
+        if (diff <= 0) {
+          // Si ya pasó el tiempo, reiniciar el temporizador
+          startCountdown();
+          return;
+        }
+        
+        // Calcular horas, minutos y segundos
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+        
+        // Actualizar elementos en el DOM
+        document.getElementById('hours').textContent = hours.toString().padStart(2, '0');
+        document.getElementById('minutes').textContent = minutes.toString().padStart(2, '0');
+        document.getElementById('seconds').textContent = seconds.toString().padStart(2, '0');
+      }
+      
+      // Función para mostrar notificación toast
+      function showToast(title, message, type = 'info') {
+        const toastContainer = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = 'toast ' + type;
+        
+        toast.innerHTML = \`
+          <div class="toast-title">\${title}</div>
+          <div class="toast-message">\${message}</div>
+        \`;
+        
+        toastContainer.appendChild(toast);
+        
+        // Auto destruir después de 5 segundos
+        setTimeout(() => {
+          toast.style.opacity = '0';
+          toast.style.transform = 'translateX(100%)';
+          setTimeout(() => {
+            if (toastContainer.contains(toast)) {
+              toastContainer.removeChild(toast);
+            }
+          }, 300);
+        }, 5000);
+      }
+      
+      // Función para mostrar estado de carga en botones
+      function setButtonLoading(button, isLoading) {
+        if (!button) return;
+        
+        const spinner = button.querySelector('.spinner');
+        if (!spinner) return;
+        
+        if (isLoading) {
+          button.disabled = true;
+          spinner.style.display = 'inline-block';
+        } else {
+          button.disabled = false;
+          spinner.style.display = 'none';
+        }
+      }
+      
+      // Función para cargar información del sistema
+      async function loadSystemInfo() {
+        try {
+          // Información del sistema operativo
+          osInfoElement.textContent = os.type() + ' ' + os.release();
+          
+          // Información del procesador
+          cpuInfoElement.textContent = os.cpus()[0].model;
+          
+          // Información de memoria RAM
+          const totalRam = Math.round(os.totalmem() / (1024 * 1024 * 1024));
+          const freeRam = Math.round(os.freemem() / (1024 * 1024 * 1024));
+          ramInfoElement.textContent = \`\${freeRam} GB / \${totalRam} GB\`;
+          
+          // Información de red
+          let networkInterfaces = os.networkInterfaces();
+          let ipAddress = 'No disponible';
+          let macAddress = 'No disponible';
+          
+          // Buscar la interfaz de red principal
+          for (const name in networkInterfaces) {
+            for (const iface of networkInterfaces[name]) {
+              // Filtrar las interfaces IPv4 que no sean internas
+              if (iface.family === 'IPv4' && !iface.internal) {
+                ipAddress = iface.address;
+                macAddress = iface.mac;
+                break;
+              }
+            }
+            if (ipAddress !== 'No disponible') break;
+          }
+          
+          networkInfoElement.textContent = \`\${ipAddress} / \${macAddress}\`;
+          
+          // Información de servidor
+          serverAddressElement.textContent = await getServerAddress();
+          
+          // Información de arquitectura
+          archInfoElement.textContent = os.arch();
+          
+          // Directorio de logs
+          const logDir = path.join(os.homedir(), 'AppData', 'Local', 'SystemInfoAgent', 'logs');
+          logPathElement.textContent = logDir;
+          
+          // Cargar eventos recientes
+          loadRecentEvents();
+          
+        } catch (error) {
+          console.error('Error al cargar información del sistema:', error);
+          showToast('Error', 'No se pudo cargar la información del sistema', 'error');
+        }
+      }
+      
+      // Función para obtener la dirección del servidor de la base de datos
+      async function getServerAddress() {
+        try {
+          const appDir = path.dirname(process.execPath);
+          const configPath = path.join(appDir, 'config.json');
+          
+          // Si no podemos obtener la configuración, usar un valor por defecto
+          return 'gamez-solutions.ddns.net';
+        } catch (error) {
+          console.error('Error al obtener dirección del servidor:', error);
+          return 'No disponible';
+        }
+      }
+      
+      // Función para cargar eventos recientes
+      function loadRecentEvents() {
+        // Ejemplos de eventos para demostración
+        const events = [
+          { date: new Date(), type: 'info', message: 'Aplicación iniciada' },
+          { date: new Date(Date.now() - 30 * 60 * 1000), type: 'success', message: 'Información recopilada correctamente' },
+          { date: new Date(Date.now() - 6 * 60 * 60 * 1000), type: 'info', message: 'Servicio iniciado' }
+        ];
+        
+        // Limpiar contenedor
+        eventsContainer.innerHTML = '';
+        
+        // Mostrar eventos
+        events.forEach(event => {
+          const eventElement = document.createElement('div');
+          eventElement.className = 'info-item';
+          
+          const timeString = event.date.toLocaleTimeString() + ' ' + event.date.toLocaleDateString();
+          
+          eventElement.innerHTML = \`
+            <div class="info-label">\${timeString}</div>
+            <div class="info-value \${event.type}">\${event.message}</div>
+          \`;
+          
+          eventsContainer.appendChild(eventElement);
+        });
+        
+        // Si no hay eventos, mostrar mensaje
+        if (events.length === 0) {
+          eventsContainer.innerHTML = '<div class="info-item"><div class="info-label">No hay eventos recientes</div></div>';
+        }
+      }
+      
+      // Control de la ventana
+      minimizeButton.addEventListener('click', () => {
+        ipcRenderer.send('minimize-window');
+      });
+      
+      closeButton.addEventListener('click', () => {
+        ipcRenderer.send('close-window');
+      });
+      
+      // Configurar eventos para navegación
+      document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const tabId = item.getAttribute('data-tab');
+          switchTab(tabId);
+        });
+      });
+      
+      // Funcionalidad de botones compartida para ambas pestañas
+      [startBtn, startBtn2].forEach(btn => {
+        if (!btn) return;
+        
+        btn.addEventListener('click', async () => {
+          try {
+            setButtonLoading(startBtn, true);
+            setButtonLoading(startBtn2, true);
+            
+            await execAsync('net start "SystemInfoAgent"');
+            updateUI('running');
+            showToast('Servicio iniciado', 'El servicio se ha iniciado correctamente', 'success');
+          } catch (error) {
+            showToast('Error', 'No se pudo iniciar el servicio: ' + error.message, 'error');
+          } finally {
+            setButtonLoading(startBtn, false);
+            setButtonLoading(startBtn2, false);
+          }
+        });
+      });
+      
+      [stopBtn, stopBtn2].forEach(btn => {
+        if (!btn) return;
+        
+        btn.addEventListener('click', async () => {
+          try {
+            setButtonLoading(stopBtn, true);
+            setButtonLoading(stopBtn2, true);
+            
+            await execAsync('net stop "SystemInfoAgent"');
+            updateUI('stopped');
+            showToast('Servicio detenido', 'El servicio se ha detenido correctamente', 'info');
+          } catch (error) {
+            showToast('Error', 'No se pudo detener el servicio: ' + error.message, 'error');
+          } finally {
+            setButtonLoading(stopBtn, false);
+            setButtonLoading(stopBtn2, false);
+          }
+        });
+      });
+      
+      [refreshBtn, refreshBtn2].forEach(btn => {
+        if (!btn) return;
+        
+        btn.addEventListener('click', async () => {
+          try {
+            setButtonLoading(refreshBtn, true);
+            setButtonLoading(refreshBtn2, true);
+            
+            const { stdout } = await execAsync('sc query "SystemInfoAgent"');
+            const status = stdout.includes('RUNNING') ? 'running' : 
+                       stdout.includes('STOPPED') ? 'stopped' : 'unknown';
+            updateUI(status);
+            showToast('Estado actualizado', 'El estado del servicio se ha actualizado', 'info');
+          } catch (error) {
+            updateUI('unknown');
+            showToast('Error', 'No se pudo verificar el estado: ' + error.message, 'error');
+          } finally {
+            setButtonLoading(refreshBtn, false);
+            setButtonLoading(refreshBtn2, false);
+          }
+        });
+      });
+      
+      // Eventos para botones de instalación/desinstalación
+      installBtn.addEventListener('click', async () => {
+        try {
+          setButtonLoading(installBtn, true);
+          toggleLoading(true);
+          
+          await execAsync(\`"\${process.execPath}" --install-service\`);
+          updateUI('stopped');
+          showToast('Servicio instalado', 'El servicio se ha instalado correctamente', 'success');
+        } catch (error) {
+          showToast('Error', 'No se pudo instalar el servicio: ' + error.message, 'error');
+        } finally {
+          setButtonLoading(installBtn, false);
+          toggleLoading(false);
+        }
+      });
+      
+      uninstallBtn.addEventListener('click', async () => {
+        try {
+          setButtonLoading(uninstallBtn, true);
+          toggleLoading(true);
+          
+          await execAsync(\`"\${process.execPath}" --uninstall-service\`);
+          updateUI('unknown');
+          showToast('Servicio desinstalado', 'El servicio se ha desinstalado correctamente', 'info');
+        } catch (error) {
+          showToast('Error', 'No se pudo desinstalar el servicio: ' + error.message, 'error');
+        } finally {
+          setButtonLoading(uninstallBtn, false);
+          toggleLoading(false);
+        }
+      });
+      
+      // Evento para botón de recopilación
+      collectBtn.addEventListener('click', async () => {
+        try {
+          setButtonLoading(collectBtn, true);
+          toggleLoading(true);
+          
+          const result = await ipcRenderer.invoke('collect-system-info');
+          
+          if (result.success) {
+            showToast('Recopilación completada', 'La información del sistema ha sido recopilada y guardada correctamente', 'success');
+            
+            // Reiniciar el temporizador
+            startCountdown();
+            
+            // Recargar eventos recientes
+            loadRecentEvents();
+          } else {
+            showToast('Error', 'Error al recopilar información: ' + result.message, 'error');
+          }
+        } catch (error) {
+          showToast('Error', 'Error al ejecutar la recopilación: ' + error.message, 'error');
+        } finally {
+          setButtonLoading(collectBtn, false);
+          toggleLoading(false);
+        }
+      });
+      
+      // Botón de prueba de conexión
+      document.getElementById('testConnectionBtn').addEventListener('click', async () => {
+        try {
+          const btn = document.getElementById('testConnectionBtn');
+          btn.disabled = true;
+          btn.textContent = 'Probando conexión...';
+          
+          // Simular prueba de conexión
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          
+          showToast('Conexión exitosa', 'Se ha establecido conexión con el servidor correctamente', 'success');
+        } catch (error) {
+          showToast('Error de conexión', 'No se pudo conectar al servidor: ' + error.message, 'error');
+        } finally {
+          const btn = document.getElementById('testConnectionBtn');
+          btn.disabled = false;
+          btn.textContent = 'Probar Conexión';
+        }
+      });
+      
+      // Escuchar eventos de notificaciones desde el proceso principal
+      ipcRenderer.on('show-toast', (event, { title, message, type }) => {
+        showToast(title, message, type || 'info');
+      });
+      
+      // Inicializar la aplicación
+      document.addEventListener('DOMContentLoaded', async () => {
+        try {
+          // Cargar información del sistema
+          await loadSystemInfo();
+          
+          // Si el servicio está en ejecución, iniciar el temporizador
+          if ('${serviceStatus}' === 'running') {
+            startCountdown();
+          } else {
+            resetCountdown();
+          }
+          
+          // Preparar spinners
+          document.querySelectorAll('.button').forEach(button => {
+            const spinner = button.querySelector('.spinner');
+            if (spinner) {
+              spinner.style.display = 'none';
+            }
+          });
+        } catch (error) {
+          console.error('Error al inicializar la aplicación:', error);
+        }
+      });
+    </script>
+  </body>
+  </html>`;
+    // Escribir el HTML al archivo
+    fs.writeFileSync(htmlPath, htmlContent);
+    // Cargar el archivo HTML
+    mainWindow.loadFile(htmlPath);
     mainWindow.on('closed', () => {
         mainWindow = null;
     });
+    // Configurar los manejadores de IPC para la ventana
+    setupWindowIPC();
+    // Mostrar la ventana cuando esté lista para mostrar
+    mainWindow.once('ready-to-show', () => {
+        if (mainWindow) {
+            mainWindow.show();
+            mainWindow.focus();
+        }
+    });
+    // Abrir DevTools en desarrollo para depuración
+    if (!electron_1.app.isPackaged) {
+        mainWindow.webContents.openDevTools();
+    }
+    // Agregar detector de errores para diagnosticar problemas
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+        logger_1.logger.error(`Error al cargar ventana: ${errorDescription} (${errorCode})`);
+    });
 }
-// Añadir esta función después de las otras funciones de utilidad
-// Función para mostrar notificaciones informativas no intrusivas
-function showToastNotification(title, message) {
+// Añadir al inicio del archivo, después de las importaciones
+let ipcHandlersRegistered = false;
+// Reemplazar la función setupWindowIPC por esta versión mejorada
+function setupWindowIPC() {
+    // Este manejador ya no registra 'collect-system-info' aquí
+    // Solo configuramos los eventos relacionados con la ventana
+    electron_1.ipcMain.on('minimize-window', () => {
+        if (mainWindow) {
+            mainWindow.minimize();
+        }
+    });
+    electron_1.ipcMain.on('close-window', () => {
+        if (mainWindow) {
+            mainWindow.hide();
+        }
+    });
+}
+// MODIFICACIÓN 3: Añadir una nueva función para registrar el manejador de collect-system-info una sola vez
+// Debe estar fuera de cualquier otra función para evitar registros repetidos
+function setupCollectInfoHandler() {
+    // Primero asegurarnos de quitar cualquier manejador existente
+    try {
+        electron_1.ipcMain.removeHandler('collect-system-info');
+    }
+    catch (error) {
+        // Si no existía un manejador, esto podría lanzar un error que ignoramos
+        logger_1.logger.debug('No había manejador previo para eliminar');
+    }
+    // Ahora registramos el manejador
+    electron_1.ipcMain.handle('collect-system-info', async () => {
+        return await collectSystemInfo();
+    });
+    logger_1.logger.info('Manejador collect-system-info registrado correctamente');
+}
+// Modificar la función showToastNotification para que funcione con la nueva UI
+function showToastNotification(title, message, type = 'info') {
+    // Registrar en logs
+    logger_1.logger.info(`Notificación: ${title} - ${message}`);
+    // Si hay una ventana principal y está en pantalla, enviar mensaje para mostrar toast
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('show-toast', { title, message, type });
+        return;
+    }
+    // Si no hay una ventana principal o está cerrada, usamos notificaciones nativas
     const iconPath = getIconPath();
     let notificationIcon;
     // Si tenemos un ícono y podemos cargarlo, lo utilizamos
@@ -669,66 +1923,14 @@ function showToastNotification(title, message) {
             notificationIcon = undefined;
         }
     }
-    // Si no hay una ventana principal o está enfocada, usamos notificaciones nativas
-    if (!mainWindow || !mainWindow.isFocused()) {
-        const notification = new electron_1.Notification({
-            title,
-            body: message,
-            icon: notificationIcon,
-            silent: false
-        });
-        // Log para depuración
-        logger_1.logger.info(`Mostrando notificación: "${title}" - Ícono: ${iconPath || 'ninguno'}`);
-        notification.show();
-        // Autodestruir después de 5 segundos
-        setTimeout(() => {
-            notification.close();
-        }, 5000);
-        return;
-    }
-    // Si la ventana está abierta y enfocada, podemos mostrar una notificación dentro de la ventana
-    // usando un script temporal
-    mainWindow.webContents.executeJavaScript(`
-    (function() {
-      // Crear el elemento de notificación
-      const toast = document.createElement('div');
-      toast.style.position = 'fixed';
-      toast.style.bottom = '20px';
-      toast.style.right = '20px';
-      toast.style.backgroundColor = 'rgba(49, 49, 49, 0.9)';
-      toast.style.color = 'white';
-      toast.style.padding = '12px 20px';
-      toast.style.borderRadius = '4px';
-      toast.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
-      toast.style.zIndex = '1000';
-      toast.style.transition = 'opacity 0.5s ease';
-      toast.style.opacity = '0';
-      
-      // Título
-      const titleEl = document.createElement('div');
-      titleEl.style.fontWeight = 'bold';
-      titleEl.style.marginBottom = '5px';
-      titleEl.textContent = "${title}";
-      toast.appendChild(titleEl);
-      
-      // Mensaje
-      const messageEl = document.createElement('div');
-      messageEl.textContent = "${message}";
-      toast.appendChild(messageEl);
-      
-      // Añadir al DOM
-      document.body.appendChild(toast);
-      
-      // Animar entrada
-      setTimeout(() => { toast.style.opacity = '1'; }, 100);
-      
-      // Autodestruir después de 5 segundos
-      setTimeout(() => {
-        toast.style.opacity = '0';
-        setTimeout(() => {
-          document.body.removeChild(toast);
-        }, 500);
-      }, 5000);
-    })();
-  `).catch(err => logger_1.logger.error('Error al mostrar notificación en ventana:', err));
+    const notification = new electron_1.Notification({
+        title,
+        body: message,
+        icon: notificationIcon,
+        silent: false
+    });
+    notification.show();
+    setTimeout(() => {
+        notification.close();
+    }, 5000);
 }
